@@ -11,8 +11,13 @@ const firebaseConfig = {
   appId: "1:139244095455:web:2ceadef26bb12dcf39666a"
 };
 
+// Initialize Firebase only if it hasn't been initialized yet
 if (!getApps().length) {
   initializeApp(firebaseConfig);
 }
 
+// Firestore instance
 export const db = getFirestore();
+
+// Default export for flexibility
+export default db;
