@@ -3,7 +3,42 @@ import { useEffect, useState } from "react";
 import { Home, Trophy, DollarSign, Zap, HelpCircle, Star, Gift } from 'lucide-react';
 
 // TESTING MODE - Set to false when ready for Firebase
-const TESTING_MODE = false;
+const TESTING_MODE = false; // Set to true to avoid Firebase errors
+
+// Firebase imports - only import when needed
+let firebaseModules = null;
+
+const getFirebaseModules = async () => {
+  if (!firebaseModules && !TESTING_MODE) {
+    try {
+      // Import Firebase modules dynamically
+      const [firestoreModule, firebaseModule] = await Promise.all([
+        import('firebase/firestore'),
+        import('./firebase') // Make sure this file exists
+      ]);
+      
+      firebaseModules = {
+        db: firebaseModule.db,
+        doc: firestoreModule.doc,
+        getDoc: firestoreModule.getDoc,
+        setDoc: firestoreModule.setDoc,
+        updateDoc: firestoreModule.updateDoc,
+        getDocs: firestoreModule.getDocs,
+        collection: firestoreModule.collection,
+        query: firestoreModule.query,
+        orderBy: firestoreModule.orderBy,
+        limit: firestoreModule.limit,
+        increment: firestoreModule.increment,
+        serverTimestamp: firestoreModule.serverTimestamp,
+        writeBatch: firestoreModule.writeBatch
+      };
+    } catch (error) {
+      console.error('Failed to load Firebase modules:', error);
+      throw error;
+    }
+  }
+  return firebaseModules;
+};
 
 // Mock Firebase functions for testing
 const mockFirebase = {
@@ -234,11 +269,11 @@ export default function AppPage() {
       }
 
       // Real Firebase mode (when TESTING_MODE = false)
-      const { db, doc, getDoc, setDoc, updateDoc, serverTimestamp } = await import("firebase/firestore");
+      const firebase = await getFirebaseModules();
       
       const userId = String(telegramUser.id);
-      const userRef = doc(db, "users", userId);
-      const userDoc = await getDoc(userRef);
+      const userRef = firebase.doc(firebase.db, "users", userId);
+      const userDoc = await firebase.getDoc(userRef);
       
       if (!userDoc.exists()) {
         // New user
@@ -254,8 +289,8 @@ export default function AppPage() {
           lastEnergyRefresh: Date.now(),
           rank: "Beginner",
           level: 1,
-          joinDate: serverTimestamp(),
-          lastActive: serverTimestamp(),
+          joinDate: firebase.serverTimestamp(),
+          lastActive: firebase.serverTimestamp(),
           achievements: [],
           referralCode: generateReferralCode(telegramUser.id, telegramUser.username),
           referredBy: referralCode || null,
@@ -263,7 +298,7 @@ export default function AppPage() {
           energyDepletions: 0
         };
         
-        await setDoc(userRef, newUser);
+        await firebase.setDoc(userRef, newUser);
         setUser(newUser);
         setCoins(0);
         setTotalTaps(0);
@@ -276,8 +311,8 @@ export default function AppPage() {
       } else {
         // Existing user
         const userData = userDoc.data();
-        await updateDoc(userRef, {
-          lastActive: serverTimestamp(),
+        await firebase.updateDoc(userRef, {
+          lastActive: firebase.serverTimestamp(),
           username: telegramUser.username || userData.username,
           firstName: telegramUser.first_name
         });
@@ -291,7 +326,7 @@ export default function AppPage() {
         if (timeSinceRefresh >= twoHoursInMs) {
           setEnergy(4104);
           setLastEnergyRefresh(now);
-          await updateDoc(userRef, { 
+          await firebase.updateDoc(userRef, { 
             energy: 4104, 
             lastEnergyRefresh: now 
           });
@@ -406,7 +441,7 @@ export default function AppPage() {
     }
   }
 
-  // Update leaderboards (placeholder for Firebase mode)
+  // Update leaderboards
   async function updateLeaderboards(userId, userData) {
     if (TESTING_MODE) {
       // In testing mode, just update local leaderboard
@@ -425,20 +460,19 @@ export default function AppPage() {
     }
 
     try {
-      const { writeBatch, doc, serverTimestamp } = await import("firebase/firestore");
-      const { db } = await import("./firebse");
+      const firebase = await getFirebaseModules();
       
-      const batch = writeBatch(db);
+      const batch = firebase.writeBatch(firebase.db);
       
       const leaderboardData = {
         coins: userData.coins,
         totalTaps: userData.totalTaps,
         username: userData.username,
         firstName: userData.firstName,
-        lastUpdated: serverTimestamp()
+        lastUpdated: firebase.serverTimestamp()
       };
       
-      const allTimeRef = doc(db, "leaderboard", "allTime", userId);
+     const allTimeRef = firebase.doc(firebase.db, "leaderboard", userId);
       batch.set(allTimeRef, leaderboardData, { merge: true });
       
       await batch.commit();
@@ -447,48 +481,88 @@ export default function AppPage() {
     }
   }
 
-  // Load leaderboard (placeholder for Firebase mode)
-  async function loadLeaderboard() {
-    if (TESTING_MODE) {
-      createMockLeaderboard();
-      return;
-    }
-
-    try {
-      const { collection, query, orderBy, limit, getDocs } = await import("firebase/firestore");
-      const { db } = await import("./firebse");
-      
-      const leaderboardQuery = query(
-        collection(db, "leaderboard", "allTime"),
-        orderBy("coins", "desc"),
-        limit(50)
-      );
-      
-      const snapshot = await getDocs(leaderboardQuery);
-      const leaderboardData = snapshot.docs.map((doc, index) => ({
-        id: doc.id,
-        rank: index + 1,
-        ...doc.data()
-      }));
-      
-      setLeaderboard(leaderboardData);
-    } catch (error) {
-      console.error("Error loading leaderboard:", error);
-    }
+  // Load leaderboard
+ // Alternative: Using subcollections for different leaderboard types
+async function loadLeaderboard() {
+  if (TESTING_MODE) {
+    createMockLeaderboard();
+    return;
   }
 
-  // Refresh energy (placeholder for Firebase mode)
+  try {
+    const firebase = await getFirebaseModules();
+    
+    // Option 2: Use subcollection: leaderboards/allTime/entries
+    const leaderboardQuery = firebase.query(
+      firebase.collection(firebase.db, "leaderboards", "allTime", "entries"), // ✅ 3 segments (odd number)
+      firebase.orderBy("coins", "desc"),
+      firebase.limit(50)
+    );
+    
+    const snapshot = await firebase.getDocs(leaderboardQuery);
+    const leaderboardData = snapshot.docs.map((doc, index) => ({
+      id: doc.id,
+      rank: index + 1,
+      ...doc.data()
+    }));
+    
+    setLeaderboard(leaderboardData);
+  } catch (error) {
+    console.error("Error loading leaderboard:", error);
+  }
+}
+
+// You'd also need to update the updateLeaderboards function:
+async function updateLeaderboards(userId, userData) {
+  if (TESTING_MODE) {
+    setLeaderboard(prev => {
+      const updated = prev.filter(p => p.id !== String(userId));
+      updated.push({
+        id: String(userId),
+        firstName: userData.firstName,
+        username: userData.username,
+        coins: userData.coins,
+        totalTaps: userData.totalTaps
+      });
+      return updated.sort((a, b) => b.coins - a.coins).map((p, i) => ({ ...p, rank: i + 1 }));
+    });
+    return;
+  }
+
+  try {
+    const firebase = await getFirebaseModules();
+    
+    const batch = firebase.writeBatch(firebase.db);
+    
+    const leaderboardData = {
+      coins: userData.coins,
+      totalTaps: userData.totalTaps,
+      username: userData.username,
+      firstName: userData.firstName,
+      lastUpdated: firebase.serverTimestamp()
+    };
+    
+    // Update to match the subcollection structure
+    const allTimeRef = firebase.doc(firebase.db, "leaderboards", "allTime", "entries", userId);
+    batch.set(allTimeRef, leaderboardData, { merge: true });
+    
+    await batch.commit();
+  } catch (error) {
+    console.error("Error updating leaderboards:", error);
+  }
+}
+
+  // Refresh energy
   async function refreshEnergy(userId) {
     if (TESTING_MODE) {
       return;
     }
 
     try {
-      const { doc, updateDoc } = await import("firebase/firestore");
-      const { db } = await import("./firebse");
+      const firebase = await getFirebaseModules();
       
-      const userRef = doc(db, "users", userId);
-      await updateDoc(userRef, {
+      const userRef = firebase.doc(firebase.db, "users", userId);
+      await firebase.updateDoc(userRef, {
         energy: 4104,
         lastEnergyRefresh: Date.now()
       });
@@ -556,7 +630,7 @@ export default function AppPage() {
   }
 
   // Batch database updates (only for Firebase mode)
-  const batchUpdate = (coinsChange, energyChange) => {
+  const batchUpdate = async (coinsChange, energyChange) => {
     if (TESTING_MODE) return;
 
     if (updateTimeout) {
@@ -572,24 +646,23 @@ export default function AppPage() {
       if (!user || (pendingUpdates.coins === 0 && pendingUpdates.energy === 0)) return;
       
       try {
-        const { doc, updateDoc, increment, serverTimestamp } = await import("firebase/firestore");
-        const { db } = await import("./firebse");
+        const firebase = await getFirebaseModules();
         
-        const userRef = doc(db, "users", String(user.telegramId));
+        const userRef = firebase.doc(firebase.db, "users", String(user.telegramId));
         const updates = {};
         
         if (pendingUpdates.coins !== 0) {
-          updates.coins = increment(pendingUpdates.coins);
-          updates.totalTaps = increment(pendingUpdates.coins);
+          updates.coins = firebase.increment(pendingUpdates.coins);
+          updates.totalTaps = firebase.increment(pendingUpdates.coins);
         }
         if (pendingUpdates.energy !== 0) {
-          updates.energy = increment(pendingUpdates.energy);
+          updates.energy = firebase.increment(pendingUpdates.energy);
         }
         
-        updates.lastActive = serverTimestamp();
+        updates.lastActive = firebase.serverTimestamp();
         
         if (energy <= 1 && pendingUpdates.energy < 0) {
-          updates.energyDepletions = increment(1);
+          updates.energyDepletions = firebase.increment(1);
         }
         
         const newLevel = calculateLevel(totalTaps);
@@ -603,7 +676,7 @@ export default function AppPage() {
         }
         
         if (Object.keys(updates).length > 0) {
-          await updateDoc(userRef, updates);
+          await firebase.updateDoc(userRef, updates);
         }
         
         setPendingUpdates({ coins: 0, energy: 0 });
